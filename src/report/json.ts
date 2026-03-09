@@ -1,4 +1,5 @@
 import type { AiAdvice } from '../advisor/phi3.js';
+import type { AiSelection } from '../advisor/selection.js';
 import type { ProjectScore, ScoredFile } from '../model/metrics.js';
 
 type GateState = 'pass' | 'fail' | 'skipped';
@@ -33,6 +34,13 @@ interface JsonReport {
     cap: GateState;
     drift: GateState;
   };
+  ai: {
+    reviewedFiles: number;
+    threshold: number | null;
+    eligibleFiles: number;
+    totalFiles: number;
+    fallbackUsed: boolean;
+  };
   files: JsonFileReport[];
 }
 
@@ -44,6 +52,7 @@ export function buildJsonReport(params: {
   drift: number | undefined;
   driftPass: boolean | undefined;
   aiByPath: Map<string, AiAdvice> | undefined;
+  aiSelection: AiSelection | undefined;
 }): JsonReport {
   const sortedFiles = [...params.files].sort((a, b) => b.entropy - a.entropy);
   return {
@@ -57,6 +66,13 @@ export function buildJsonReport(params: {
     gates: {
       cap: params.capPass ? 'pass' : 'fail',
       drift: params.driftPass === undefined ? 'skipped' : params.driftPass ? 'pass' : 'fail',
+    },
+    ai: {
+      reviewedFiles: params.aiByPath?.size ?? 0,
+      threshold: params.aiSelection?.threshold ?? null,
+      eligibleFiles: params.aiSelection?.eligibleFiles ?? 0,
+      totalFiles: params.aiSelection?.totalFiles ?? params.files.length,
+      fallbackUsed: params.aiSelection?.fallbackUsed ?? false,
     },
     files: sortedFiles.map((file) => ({
       ai: params.aiByPath?.get(file.path) ?? null,

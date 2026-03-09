@@ -41,11 +41,19 @@ describe('formatTextReport', () => {
             },
           ],
         ]),
+        aiSelection: {
+          candidates: [],
+          threshold: 0.35,
+          totalFiles: 1,
+          eligibleFiles: 1,
+          fallbackUsed: false,
+        },
       },
     );
 
     expect(report).toContain('Project entropy: 0.800');
     expect(report).toContain('Baseline: 0.700');
+    expect(report).toContain('AI review: 1 reviewed');
     expect(report).toContain('AI: [god_function, deep_nesting]');
     expect(report).toContain('AI Fix: Split the handler into focused functions.');
   });

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { AiAdvice } from '../advisor/phi3.js';
+import type { AiSelection } from '../advisor/selection.js';
 import type { ProjectScore, ScoredFile, SignalContributions } from '../model/metrics.js';
 
 const HINTS: Record<keyof SignalContributions, string> = {
@@ -32,6 +33,7 @@ export function formatTextReport(
     driftBudget: number | undefined;
     driftPass: boolean | undefined;
     aiByPath: Map<string, AiAdvice> | undefined;
+    aiSelection: AiSelection | undefined;
   },
 ): string {
   const limit = options.limit ?? 5;
@@ -56,6 +58,12 @@ export function formatTextReport(
     lines.push('Baseline: not found (drift gate skipped)');
   }
   lines.push(`Files analyzed: ${project.fileCount}, LOC: ${project.totalLoc}`);
+  if (options.aiSelection) {
+    const selection = options.aiSelection;
+    lines.push(
+      `AI review: ${options.aiByPath?.size ?? 0} reviewed (threshold ${selection.threshold.toFixed(2)}, eligible ${selection.eligibleFiles}/${selection.totalFiles}${selection.fallbackUsed ? ', fallback top-file used' : ''})`,
+    );
+  }
   lines.push('');
 
   if (topFiles.length === 0) {
