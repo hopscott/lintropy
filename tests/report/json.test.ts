@@ -46,10 +46,18 @@ describe('buildJsonReport', () => {
       drift: undefined,
       driftPass: undefined,
       aiByPath: undefined,
+      aiSelection: undefined,
     });
 
     expect(report).toMatchInlineSnapshot(`
       {
+        "ai": {
+          "eligibleFiles": 0,
+          "fallbackUsed": false,
+          "reviewedFiles": 0,
+          "threshold": null,
+          "totalFiles": 2,
+        },
         "files": [
           {
             "ai": null,

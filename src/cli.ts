@@ -2,6 +2,8 @@
 import { Command } from 'commander';
 import type { AiAdvice } from './advisor/phi3.js';
 import { runPhi3Advisor } from './advisor/phi3.js';
+import type { AiSelection } from './advisor/selection.js';
+import { selectAiCandidates } from './advisor/selection.js';
 import { analyzeFile } from './analyze/ast.js';
 import { DEFAULT_BASELINE_PATH, readBaseline, writeBaseline } from './baseline/store.js';
 import { discoverTypeScriptFiles } from './discovery/files.js';
@@ -43,7 +45,7 @@ async function main(): Promise<void> {
     .option('--format <mode>', 'Output format: text|json', 'text')
     .option('--ai', 'Enable Phi-3 advisor for top offenders', false)
     .option('--model-path <path>', 'Path to GGUF model file', DEFAULT_AI_MODEL_PATH)
-    .option('--max-ai-files <count>', 'Max files to run AI advisor against', '3')
+    .option('--ai-threshold <value>', 'Only run AI on files with entropy >= threshold', '0.35')
     .option('--ai-timeout-ms <value>', 'Per-file AI timeout in milliseconds', '45000')
     .option('--ai-retries <count>', 'AI retries per file on parse/runtime failure', '1')
     .action(
@@ -57,7 +59,7 @@ async function main(): Promise<void> {
           driftBudget: string;
           ai: boolean;
           modelPath: string;
-          maxAiFiles: string;
+          aiThreshold: string;
           aiTimeoutMs: string;
           aiRetries: string;
         },
@@ -90,14 +92,14 @@ async function main(): Promise<void> {
 
         const capPass = !exceedsAbsoluteCap(projectScore.entropy, entropyCap);
         const policyPass = capPass && (driftPass ?? true);
-        const maxAiFiles = Number(options.maxAiFiles);
-        if (Number.isNaN(maxAiFiles) || maxAiFiles < 0) {
-          console.error('Invalid --max-ai-files value. Expected a non-negative number.');
-          process.exit(2);
-        }
         const aiTimeoutMs = Number(options.aiTimeoutMs);
         if (Number.isNaN(aiTimeoutMs) || aiTimeoutMs <= 0) {
           console.error('Invalid --ai-timeout-ms value. Expected a positive number.');
+          process.exit(2);
+        }
+        const aiThreshold = Number(options.aiThreshold);
+        if (Number.isNaN(aiThreshold) || aiThreshold < 0) {
+          console.error('Invalid --ai-threshold value. Expected a non-negative number.');
           process.exit(2);
         }
         const aiRetries = Number(options.aiRetries);
@@ -107,11 +109,13 @@ async function main(): Promise<void> {
         }
 
         let aiByPath: Map<string, AiAdvice> | undefined;
-        if (options.ai && maxAiFiles > 0 && scoredFiles.length > 0) {
+        let aiSelection: AiSelection | undefined;
+        if (options.ai && scoredFiles.length > 0) {
+          aiSelection = selectAiCandidates(scoredFiles, aiThreshold);
           try {
-            aiByPath = await runPhi3Advisor(scoredFiles, {
+            aiByPath = await runPhi3Advisor(aiSelection.candidates, {
               modelPath: options.modelPath,
-              maxFiles: maxAiFiles,
+              maxFiles: aiSelection.candidates.length,
               timeoutMs: aiTimeoutMs,
               retries: aiRetries,
             });
@@ -133,6 +137,7 @@ async function main(): Promise<void> {
             drift,
             driftPass,
             aiByPath,
+            aiSelection,
           });
           console.log(formatJsonReport(jsonReport));
         } else {
@@ -145,6 +150,7 @@ async function main(): Promise<void> {
               driftBudget,
               driftPass,
               aiByPath,
+              aiSelection,
             }),
           );
         }
@@ -204,6 +210,7 @@ async function main(): Promise<void> {
             drift,
             driftPass,
             aiByPath: undefined,
+            aiSelection: undefined,
           });
           console.log(formatJsonReport(jsonReport));
         } else {
@@ -216,6 +223,7 @@ async function main(): Promise<void> {
               driftBudget: DRIFT_DEFAULT_BUDGET,
               driftPass,
               aiByPath: undefined,
+              aiSelection: undefined,
             }),
           );
         }
