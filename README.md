@@ -9,6 +9,7 @@ This repo uses:
 - ESLint for TypeScript safety rules
 - TypeScript compiler for strict type checking
 - Knip for dead files/exports/dependencies checks
+- Husky pre-commit hooks for local quality enforcement
 
 ## Scripts
 
@@ -20,6 +21,14 @@ This repo uses:
 - `bun run test`: run unit/snapshot tests
 - `bun run build`: compile CLI to `dist/`
 - `bun run dev -- check [paths...]`: run CLI from source
+
+## Local developer guardrails
+
+- Install deps with `bun install` (this runs `prepare` and installs Husky hooks).
+- Pre-commit hook runs:
+  - `bun run check`
+  - `bun run test`
+- If a commit fails, run `bun run format` and re-run checks before committing again.
 
 ## CLI usage
 
@@ -62,3 +71,10 @@ Example:
 4. Phase D (blocking drift): fail CI on cap and drift budget violations.
 
 Current GitHub Actions workflow runs `bun run check` and `bun run test` as the default quality gate.
+
+## Branch and release workflow
+
+- Feature work: create branch from `beta`, open PR into `beta`.
+- Promotion: open PR from `beta` into `main` after beta validation.
+- `main` and `beta` are protected branches with required PR checks.
+- Only merge PRs after CI (`check`) passes.
