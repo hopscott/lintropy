@@ -9,6 +9,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "bun src/cli.ts",
+    "download-model": "bun src/download.ts",
+    "setup": "bun run download-model && bun run dev -- baseline",
     "lint:biome": "biome check .",
     "lint:eslint": "eslint .",
     "lint": "biome check . && eslint .",
