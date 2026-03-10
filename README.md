@@ -37,16 +37,45 @@ This repo uses:
 - `bun run dev -- check [paths...]`
   - analyzes TS files and enforces absolute-cap gate
   - options: `--format text|json`, `--max-entropy`, `--drift-budget`, `--no-baseline`
-  - AI options: `--ai`, `--fix`, `--fix-dry-run`, `--model-path`, `--ai-threshold`, `--ai-timeout-ms`, `--ai-retries`
+  - AI options: `--ai`, `--fix`, `--fix-dry-run`, `--model`, `--model-path`, `--ai-threshold`, `--ai-timeout-ms`, `--ai-retries`
 - `bun run dev -- baseline [paths...]`
   - generates `.lintropy-baseline.json`
 - `bun run dev -- diff [paths...]`
   - compares current project entropy to baseline
 
-### Local Phi-3 model
+### AI model (Phi-3.5-mini)
 
-By default, AI mode uses:
-- `models/Phi-3.5-mini-instruct-Q4_K_M.gguf`
+**Quickstart (bundled model):**
+
+```bash
+npm run download-model   # 2.3GB, once only (~2–5 min)
+lintropy check --ai      # Static + AI advisor
+```
+
+**Or use Ollama (zero download if you have it):**
+
+```bash
+ollama pull phi3         # Or any phi3 variant
+lintropy check --ai --model ollama
+```
+
+**Model discovery order:** bundled (`models/phi3.q4.gguf`) → Ollama (auto-detect phi3) → error with instructions.
+
+**CLI flags:**
+- `lintropy check --ai` — auto-detect (bundled > ollama > error)
+- `lintropy check --ai --model ollama` — force Ollama
+- `lintropy check --ai --model bundled` — force bundled GGUF
+- `lintropy check --ai --model-path ./custom.gguf` — custom GGUF path
+
+**Config (`.lintropy.json`):**
+
+```json
+{
+  "model": "bundled",
+  "thresholds": { "ai": 0.35 },
+  "ollama": { "model": "phi3", "baseUrl": "http://localhost:11434" }
+}
+```
 
 Examples:
 - `bun run dev -- check src --ai --ai-threshold 0.35`

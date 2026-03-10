@@ -3,6 +3,6 @@ dist/
 .DS_Store
 coverage/
 .lintropy-baseline.json
-models/*.gguf
+models/
 .env
 .npmrc
