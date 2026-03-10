@@ -32,6 +32,10 @@
   "keywords": [],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hopscott/lintropy"
+  },
   "description": "Entropy linter for TypeScript vibe-coding issues.",
   "dependencies": {
     "@types/node": "^25.4.0",
