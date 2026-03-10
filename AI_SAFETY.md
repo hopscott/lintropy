@@ -15,5 +15,5 @@
 ## Operational Guidance
 
 - Do not treat AI text as authoritative facts.
-- Do not execute generated suggestions automatically.
 - Keep AI non-blocking in CI until output stability is proven.
+- `--fix` and `--fix-dry-run`: Opt-in only. Use `--fix-dry-run` first to preview changes. Apply fixes only when you have reviewed the diff.
