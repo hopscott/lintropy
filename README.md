@@ -37,7 +37,7 @@ This repo uses:
 - `bun run dev -- check [paths...]`
   - analyzes TS files and enforces absolute-cap gate
   - options: `--format text|json`, `--max-entropy`, `--drift-budget`, `--no-baseline`
-  - AI options: `--ai`, `--model-path`, `--ai-threshold`, `--ai-timeout-ms`, `--ai-retries`
+  - AI options: `--ai`, `--fix`, `--fix-dry-run`, `--model-path`, `--ai-threshold`, `--ai-timeout-ms`, `--ai-retries`
 - `bun run dev -- baseline [paths...]`
   - generates `.lintropy-baseline.json`
 - `bun run dev -- diff [paths...]`
@@ -48,8 +48,10 @@ This repo uses:
 By default, AI mode uses:
 - `models/Phi-3.5-mini-instruct-Q4_K_M.gguf`
 
-Example:
+Examples:
 - `bun run dev -- check src --ai --ai-threshold 0.35`
+- `bun run dev -- check src --ai --fix-dry-run` — preview AI fixes without applying
+- `bun run dev -- check src --ai --fix` — apply AI-generated refactors
 
 ### AI safety and compliance
 

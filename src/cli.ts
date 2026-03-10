@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import path from 'node:path';
 import { Command } from 'commander';
 import type { AiAdvice } from './advisor/phi3.js';
 import { runPhi3Advisor } from './advisor/phi3.js';
@@ -7,6 +8,7 @@ import { selectAiCandidates } from './advisor/selection.js';
 import { analyzeFile } from './analyze/ast.js';
 import { DEFAULT_BASELINE_PATH, readBaseline, writeBaseline } from './baseline/store.js';
 import { discoverTypeScriptFiles } from './discovery/files.js';
+import { applyFixes } from './fix/applier.js';
 import { buildJsonReport, formatJsonReport } from './report/json.js';
 import { formatTextReport } from './report/text.js';
 import { ENTROPY_DEFAULTS, exceedsAbsoluteCap, scoreFile, scoreProject } from './score/entropy.js';
@@ -19,7 +21,8 @@ async function computeScores(paths: string[]) {
   const metrics = files.map((filePath) => analyzeFile(filePath));
   const scoredFiles = metrics.map((fileMetrics) => scoreFile(fileMetrics));
   const projectScore = scoreProject(scoredFiles);
-  return { scoredFiles, projectScore };
+  const metricsByPath = new Map(metrics.map((m) => [m.path, m]));
+  return { scoredFiles, projectScore, metricsByPath };
 }
 
 async function main(): Promise<void> {
@@ -44,6 +47,8 @@ async function main(): Promise<void> {
     .option('--no-baseline', 'Skip baseline drift checks')
     .option('--format <mode>', 'Output format: text|json', 'text')
     .option('--ai', 'Enable Phi-3 advisor for top offenders', false)
+    .option('--fix', 'Apply AI-generated fixes to files (requires --ai)', false)
+    .option('--fix-dry-run', 'Show what would be fixed without writing (requires --ai)', false)
     .option('--model-path <path>', 'Path to GGUF model file', DEFAULT_AI_MODEL_PATH)
     .option('--ai-threshold <value>', 'Only run AI on files with entropy >= threshold', '0.35')
     .option('--ai-timeout-ms <value>', 'Per-file AI timeout in milliseconds', '45000')
@@ -58,13 +63,15 @@ async function main(): Promise<void> {
           baselineFile: string;
           driftBudget: string;
           ai: boolean;
+          fix: boolean;
+          fixDryRun: boolean;
           modelPath: string;
           aiThreshold: string;
           aiTimeoutMs: string;
           aiRetries: string;
         },
       ) => {
-        const { scoredFiles, projectScore } = await computeScores(paths);
+        const { scoredFiles, projectScore, metricsByPath } = await computeScores(paths);
 
         const driftBudget = Number(options.driftBudget);
         if (Number.isNaN(driftBudget)) {
@@ -108,6 +115,12 @@ async function main(): Promise<void> {
           process.exit(2);
         }
 
+        const fixMode = options.fix || options.fixDryRun;
+        if (fixMode && !options.ai) {
+          console.error('--fix and --fix-dry-run require --ai. Enable AI mode first.');
+          process.exit(2);
+        }
+
         let aiByPath: Map<string, AiAdvice> | undefined;
         let aiSelection: AiSelection | undefined;
         if (options.ai && scoredFiles.length > 0) {
@@ -118,6 +131,8 @@ async function main(): Promise<void> {
               maxFiles: aiSelection.candidates.length,
               timeoutMs: aiTimeoutMs,
               retries: aiRetries,
+              fixMode,
+              metricsByPath,
             });
           } catch (error: unknown) {
             console.error(
@@ -125,6 +140,25 @@ async function main(): Promise<void> {
                 error instanceof Error ? error.message : 'unknown advisor failure'
               }`,
             );
+          }
+        }
+
+        if (fixMode && aiByPath && aiByPath.size > 0) {
+          const results = await applyFixes(aiByPath, options.fixDryRun);
+          const applied = results.filter((r) => r.applied);
+          const withFix = results.filter((r) => {
+            const advice = aiByPath.get(r.path);
+            return advice?.fixedCode;
+          });
+          if (options.fixDryRun) {
+            console.error(
+              `\nFix dry run: ${withFix.length} file(s) with AI fixes, 0 applied (dry run)`,
+            );
+          } else if (applied.length > 0) {
+            console.error(`\nApplied fixes to ${applied.length} file(s):`);
+            for (const r of applied) {
+              console.error(`  - ${path.relative(process.cwd(), r.path) || r.path}`);
+            }
           }
         }
 

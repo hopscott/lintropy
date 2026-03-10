@@ -19,6 +19,11 @@ interface JsonFileReport {
     explanation: string;
     suggestion: string;
     model: string;
+    primaryIssue?: string;
+    blameLines?: (number | string)[];
+    fixCode?: string;
+    entropyDelta?: string;
+    confidence?: number;
   } | null;
 }
 
@@ -74,13 +79,30 @@ export function buildJsonReport(params: {
       totalFiles: params.aiSelection?.totalFiles ?? params.files.length,
       fallbackUsed: params.aiSelection?.fallbackUsed ?? false,
     },
-    files: sortedFiles.map((file) => ({
-      ai: params.aiByPath?.get(file.path) ?? null,
-      path: file.path,
-      loc: file.loc,
-      entropy: file.entropy,
-      signalScores: file.signalScores,
-    })),
+    files: sortedFiles.map((file) => {
+      const advice = params.aiByPath?.get(file.path);
+      const ai = advice
+        ? {
+            tags: advice.tags,
+            severity: advice.severity,
+            explanation: advice.explanation,
+            suggestion: advice.suggestion,
+            model: advice.model,
+            ...(advice.primaryIssue && { primaryIssue: advice.primaryIssue }),
+            ...(advice.blameLines?.length && { blameLines: advice.blameLines }),
+            ...(advice.fixCode && { fixCode: advice.fixCode }),
+            ...(advice.entropyDelta && { entropyDelta: advice.entropyDelta }),
+            ...(advice.confidence != null && { confidence: advice.confidence }),
+          }
+        : null;
+      return {
+        ai,
+        path: file.path,
+        loc: file.loc,
+        entropy: file.entropy,
+        signalScores: file.signalScores,
+      };
+    }),
   };
 }
 
