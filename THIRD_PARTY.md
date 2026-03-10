@@ -6,7 +6,7 @@
 - Upstream: Microsoft Phi-3.5 Mini Instruct
 - Source: `huggingface.co/microsoft/Phi-3.5-mini-instruct-gguf`
 - Intended use: optional local AI advisor for `lintropy check --ai`
-- Runtime: local `llama-cli` invocation only (no network dependency in advisor path)
+- Runtime: local Ollama API only (no external network dependency)
 
 ## Compliance Notes
 

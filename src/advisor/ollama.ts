@@ -1,10 +1,9 @@
 /**
- * Ollama-based AI advisor. Uses same prompt/parsing as phi3.
+ * Ollama-based AI advisor.
  */
 import { promises as fs } from 'node:fs';
 import type { FileMetrics, ScoredFile } from '../model/metrics.js';
-import type { AiAdvice } from './phi3.js';
-import type { AiProgressInfo } from './phi3-shared.js';
+import type { AiAdvice, AiProgressInfo } from './phi3-shared.js';
 import { buildAdvisorPrompt, parseAdvisorResponse } from './phi3-shared.js';
 
 const DEFAULT_OLLAMA_BASE = 'http://localhost:11434';
@@ -58,9 +57,36 @@ export interface OllamaAdvisorParams {
   maxFiles: number;
   timeoutMs?: number;
   retries?: number;
+  /** Max concurrent AI requests (default 1) */
+  concurrency?: number;
   fixMode?: boolean;
   metricsByPath?: Map<string, FileMetrics>;
   onProgress?: (info: AiProgressInfo) => void;
+}
+
+function createConcurrencyLimiter(limit: number) {
+  let active = 0;
+  const waiters: Array<() => void> = [];
+  const acquire = (): Promise<void> => {
+    if (active < limit) {
+      active++;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      waiters.push(() => {
+        active++;
+        resolve();
+      });
+    });
+  };
+  const release = (): void => {
+    active--;
+    if (waiters.length > 0) {
+      const next = waiters.shift();
+      next?.();
+    }
+  };
+  return { acquire, release };
 }
 
 export async function runOllamaAdvisor(
@@ -71,6 +97,7 @@ export async function runOllamaAdvisor(
   const fixMode = params.fixMode ?? false;
   const maxTokens = fixMode ? 8192 : 512;
   const timeoutMs = params.timeoutMs ?? 45_000;
+  const concurrency = Math.max(1, params.concurrency ?? 1);
 
   const topFiles = [...scoredFiles]
     .sort((a, b) => b.entropy - a.entropy)
@@ -81,51 +108,58 @@ export async function runOllamaAdvisor(
   const retries = Math.max(0, params.retries ?? 1);
   const total = topFiles.length;
   const startTime = Date.now();
+  const limiter = createConcurrencyLimiter(concurrency);
+  let completedCount = 0;
 
-  for (let i = 0; i < topFiles.length; i += 1) {
-    const file = topFiles[i]!;
-    const current = i + 1;
-    const elapsedMs = Date.now() - startTime;
-    const completedCount = i;
-    const avgMsPerFile = completedCount > 0 ? elapsedMs / completedCount : undefined;
-    const etaMs = avgMsPerFile !== undefined ? avgMsPerFile * (total - current) : undefined;
+  const processFile = async (file: ScoredFile): Promise<void> => {
+    await limiter.acquire();
+    try {
+      const source = await fs.readFile(file.path, 'utf-8');
+      const metrics = metricsByPath.get(file.path);
+      const prompt = buildAdvisorPrompt(file, source.slice(0, 4000), fixMode, metrics);
 
-    params.onProgress?.({
-      current,
-      total,
-      filePath: file.path,
-      ...(etaMs !== undefined && { etaMs }),
-    });
+      let raw = '';
+      let parsed: AiAdvice | null = null;
 
-    const source = await fs.readFile(file.path, 'utf-8');
-    const metrics = metricsByPath.get(file.path);
-    const prompt = buildAdvisorPrompt(file, source.slice(0, 4000), fixMode, metrics);
-
-    let raw = '';
-    let parsed: AiAdvice | null = null;
-
-    for (let attempt = 0; attempt <= retries; attempt += 1) {
-      try {
-        raw = await ollamaGenerate({
-          model: params.modelName,
-          prompt,
-          baseUrl,
-          timeoutMs,
-          maxTokens,
-        });
-        parsed = parseAdvisorResponse(raw, fixMode);
-        if (parsed) break;
-      } catch {
-        if (attempt === retries) {
-          throw new Error(`AI inference failed for ${file.path}`);
+      for (let attempt = 0; attempt <= retries; attempt += 1) {
+        try {
+          raw = await ollamaGenerate({
+            model: params.modelName,
+            prompt,
+            baseUrl,
+            timeoutMs,
+            maxTokens,
+          });
+          parsed = parseAdvisorResponse(raw, fixMode);
+          if (parsed) break;
+        } catch {
+          if (attempt === retries) {
+            throw new Error(`AI inference failed for ${file.path}`);
+          }
         }
       }
-    }
 
-    if (parsed) {
-      results.set(file.path, parsed);
+      if (parsed) {
+        results.set(file.path, parsed);
+      }
+
+      completedCount++;
+      const elapsedMs = Date.now() - startTime;
+      const avgMsPerFile = completedCount > 0 ? elapsedMs / completedCount : undefined;
+      const etaMs =
+        avgMsPerFile !== undefined ? avgMsPerFile * (total - completedCount) : undefined;
+      params.onProgress?.({
+        current: completedCount,
+        total,
+        filePath: file.path,
+        ...(etaMs !== undefined && { etaMs }),
+      });
+    } finally {
+      limiter.release();
     }
-  }
+  };
+
+  await Promise.all(topFiles.map(processFile));
 
   return results;
 }

@@ -1,4 +1,4 @@
-import type { AiAdvice } from '../advisor/phi3.js';
+import type { AiAdvice } from '../advisor/phi3-shared.js';
 import type { AiSelection } from '../advisor/selection.js';
 import type { ProjectScore, ScoredFile } from '../model/metrics.js';
 

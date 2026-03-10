@@ -5,7 +5,7 @@ import type { ProjectScore, ScoredFile } from '../model/metrics.js';
 export const DEFAULT_BASELINE_PATH = path.resolve('.lintropy-baseline.json');
 const BASELINE_VERSION = 1;
 
-interface BaselineData {
+export interface BaselineData {
   version: number;
   recordedAt: string;
   project: {

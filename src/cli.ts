@@ -3,11 +3,9 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { findModel } from './advisor/config.js';
 import { runOllamaAdvisor } from './advisor/ollama.js';
-import type { AiAdvice } from './advisor/phi3.js';
-import { runPhi3Advisor } from './advisor/phi3.js';
-import type { AiProgressInfo } from './advisor/phi3-shared.js';
+import type { AiAdvice, AiProgressInfo } from './advisor/phi3-shared.js';
 import type { AiSelection } from './advisor/selection.js';
-import { selectAiCandidates } from './advisor/selection.js';
+import { selectAiCandidates, selectAiOutliers } from './advisor/selection.js';
 import { analyzeFile } from './analyze/ast.js';
 import { DEFAULT_BASELINE_PATH, readBaseline, writeBaseline } from './baseline/store.js';
 import { discoverTypeScriptFiles } from './discovery/files.js';
@@ -44,7 +42,6 @@ function createProgressReporter(): {
     const { current, total, filePath, etaMs } = lastInfo;
     const rel = path.relative(process.cwd(), filePath) || filePath;
     const truncated = rel.length > 36 ? `...${rel.slice(-33)}` : rel;
-    const pct = Math.round((current / total) * 100);
     const filled = Math.round((current / total) * BAR_WIDTH);
     const bar = '█'.repeat(filled) + '░'.repeat(BAR_WIDTH - filled);
     const eta = etaMs !== undefined ? ` · ${formatEta(etaMs)} left` : '';
@@ -75,7 +72,7 @@ function createProgressReporter(): {
         interval = null;
       }
       if (isTTY && lastInfo) {
-        process.stderr.write('\r' + ' '.repeat(100) + '\r');
+        process.stderr.write(`\r${' '.repeat(100)}\r`);
       }
       lastInfo = null;
     },
@@ -112,12 +109,19 @@ async function main(): Promise<void> {
     .option('--baseline-file <path>', 'Override baseline file path', DEFAULT_BASELINE_PATH)
     .option('--no-baseline', 'Skip baseline drift checks')
     .option('--format <mode>', 'Output format: text|json', 'text')
-    .option('--ai', 'Enable Phi-3 advisor for top offenders', false)
+    .option('--ai', 'Enable AI advisor for top offenders (requires Ollama)', false)
     .option('--fix', 'Apply AI-generated fixes to files (requires --ai)', false)
     .option('--fix-dry-run', 'Show what would be fixed without writing (requires --ai)', false)
-    .option('--model <source>', 'Model source: auto (default) | bundled | ollama | <path>', 'auto')
-    .option('--model-path <path>', 'Path to GGUF model file (overrides --model when set)')
-    .option('--ai-threshold <value>', 'Only run AI on files with entropy >= threshold', '0.35')
+    .option('--ai-threshold <value>', 'Legacy: run AI on files with entropy >= threshold', '0.35')
+    .option(
+      '--ai-outlier-k <value>',
+      'Outlier mode: select files with entropy > mean + k*stdDev',
+      '1.5',
+    )
+    .option('--ai-baseline-aware', 'Use baseline deltas for outlier selection when baseline exists')
+    .option('--ai-max-files <N>', 'Cap number of files sent to AI', '10')
+    .option('--ai-concurrency <N>', 'Max concurrent AI requests (Ollama only, default 1)', '1')
+    .option('--ai-use-threshold', 'Use legacy threshold mode instead of outlier mode')
     .option('--ai-timeout-ms <value>', 'Per-file AI timeout in milliseconds', '45000')
     .option('--ai-retries <count>', 'AI retries per file on parse/runtime failure', '1')
     .action(
@@ -132,9 +136,12 @@ async function main(): Promise<void> {
           ai: boolean;
           fix: boolean;
           fixDryRun: boolean;
-          model: string;
-          modelPath?: string;
           aiThreshold: string;
+          aiOutlierK: string;
+          aiBaselineAware: boolean;
+          aiMaxFiles: string;
+          aiConcurrency: string;
+          aiUseThreshold: boolean;
           aiTimeoutMs: string;
           aiRetries: string;
         },
@@ -148,10 +155,11 @@ async function main(): Promise<void> {
         }
 
         let baselineEntropy: number | undefined;
+        let baseline: Awaited<ReturnType<typeof readBaseline>> = null;
         let drift: number | undefined;
         let driftPass: boolean | undefined;
         if (options.baseline) {
-          const baseline = await readBaseline(options.baselineFile);
+          baseline = await readBaseline(options.baselineFile);
           if (baseline) {
             baselineEntropy = baseline.project.entropy;
             drift = projectScore.entropy - baseline.project.entropy;
@@ -182,6 +190,21 @@ async function main(): Promise<void> {
           console.error('Invalid --ai-retries value. Expected a non-negative number.');
           process.exit(2);
         }
+        const aiOutlierK = Number(options.aiOutlierK);
+        if (Number.isNaN(aiOutlierK) || aiOutlierK < 0) {
+          console.error('Invalid --ai-outlier-k value. Expected a non-negative number.');
+          process.exit(2);
+        }
+        const aiMaxFiles = Number(options.aiMaxFiles);
+        if (Number.isNaN(aiMaxFiles) || aiMaxFiles < 1) {
+          console.error('Invalid --ai-max-files value. Expected a positive integer.');
+          process.exit(2);
+        }
+        const aiConcurrency = Number(options.aiConcurrency);
+        if (Number.isNaN(aiConcurrency) || aiConcurrency < 1) {
+          console.error('Invalid --ai-concurrency value. Expected a positive integer.');
+          process.exit(2);
+        }
 
         const fixMode = options.fix || options.fixDryRun;
         if (fixMode && !options.ai) {
@@ -192,43 +215,31 @@ async function main(): Promise<void> {
         let aiByPath: Map<string, AiAdvice> | undefined;
         let aiSelection: AiSelection | undefined;
         if (options.ai && scoredFiles.length > 0) {
-          aiSelection = selectAiCandidates(scoredFiles, aiThreshold);
+          aiSelection = options.aiUseThreshold
+            ? selectAiCandidates(scoredFiles, aiThreshold)
+            : selectAiOutliers(scoredFiles, {
+                outlierK: aiOutlierK,
+                baseline,
+                baselineAware: options.aiBaselineAware && !!baseline,
+              });
+          const candidates = aiSelection.candidates.slice(0, aiMaxFiles);
           const progress = createProgressReporter();
           try {
-            const override: string | undefined = options.modelPath
-              ? path.resolve(process.cwd(), options.modelPath)
-              : options.model === 'auto'
-                ? undefined
-                : options.model;
-            const resolved = await findModel(override !== undefined ? { override } : undefined);
-            if (resolved.type === 'ollama') {
-              console.error(`🤖 Using Ollama model: ${resolved.pathOrName}`);
-              const n = aiSelection.candidates.length;
-              if (n > 0) console.error(`AI analyzing ${n} file(s)...`);
-              aiByPath = await runOllamaAdvisor(aiSelection.candidates, {
-                modelName: resolved.pathOrName,
-                maxFiles: aiSelection.candidates.length,
-                timeoutMs: aiTimeoutMs,
-                retries: aiRetries,
-                fixMode,
-                metricsByPath,
-                onProgress: progress.onProgress,
-              });
-            } else {
-              console.error(`🤖 Using bundled/local model: ${resolved.pathOrName}`);
-              const n = aiSelection.candidates.length;
-              if (n > 0) console.error(`AI analyzing ${n} file(s)...`);
-              aiByPath = await runPhi3Advisor(aiSelection.candidates, {
-                modelPath: resolved.pathOrName,
-                maxFiles: aiSelection.candidates.length,
-                timeoutMs: aiTimeoutMs,
-                retries: aiRetries,
-                fixMode,
-                metricsByPath,
-                onProgress: progress.onProgress,
-              });
-            }
-            if (aiSelection.candidates.length > 0) progress.onComplete();
+            const modelName = await findModel();
+            console.error(`🤖 Using Ollama model: ${modelName}`);
+            const n = candidates.length;
+            if (n > 0) console.error(`AI analyzing ${n} file(s)...`);
+            aiByPath = await runOllamaAdvisor(candidates, {
+              modelName,
+              maxFiles: candidates.length,
+              timeoutMs: aiTimeoutMs,
+              retries: aiRetries,
+              concurrency: aiConcurrency,
+              fixMode,
+              metricsByPath,
+              onProgress: progress.onProgress,
+            });
+            if (candidates.length > 0) progress.onComplete();
           } catch (error: unknown) {
             progress.onComplete();
             console.error(

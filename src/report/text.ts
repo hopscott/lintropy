@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { AiAdvice } from '../advisor/phi3.js';
+import type { AiAdvice } from '../advisor/phi3-shared.js';
 import type { AiSelection } from '../advisor/selection.js';
 import type { ProjectScore, ScoredFile, SignalContributions } from '../model/metrics.js';
 
@@ -60,8 +60,12 @@ export function formatTextReport(
   lines.push(`Files analyzed: ${project.fileCount}, LOC: ${project.totalLoc}`);
   if (options.aiSelection) {
     const selection = options.aiSelection;
+    const modeLabel =
+      selection.mode === 'outlier'
+        ? `outlier k=${selection.outlierK ?? 1.5}${selection.baselineAware ? ', baseline-aware' : ''}`
+        : 'threshold';
     lines.push(
-      `AI review: ${options.aiByPath?.size ?? 0} reviewed (threshold ${selection.threshold.toFixed(2)}, eligible ${selection.eligibleFiles}/${selection.totalFiles}${selection.fallbackUsed ? ', fallback top-file used' : ''})`,
+      `AI review: ${options.aiByPath?.size ?? 0} reviewed (${modeLabel}, cutoff ${selection.threshold.toFixed(2)}, eligible ${selection.eligibleFiles}/${selection.totalFiles}${selection.fallbackUsed ? ', fallback top-file used' : ''})`,
     );
   }
   lines.push('');

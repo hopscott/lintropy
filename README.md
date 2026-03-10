@@ -37,56 +37,40 @@ This repo uses:
 - `bun run dev -- check [paths...]`
   - analyzes TS files and enforces absolute-cap gate
   - options: `--format text|json`, `--max-entropy`, `--drift-budget`, `--no-baseline`
-  - AI options: `--ai`, `--fix`, `--fix-dry-run`, `--model`, `--model-path`, `--ai-threshold`, `--ai-timeout-ms`, `--ai-retries`
+  - AI options: `--ai`, `--fix`, `--fix-dry-run`, `--ai-threshold`, `--ai-timeout-ms`, `--ai-retries`
 - `bun run dev -- baseline [paths...]`
   - generates `.lintropy-baseline.json`
 - `bun run dev -- diff [paths...]`
   - compares current project entropy to baseline
 
-### AI model (Phi-3.5-mini)
+### AI advisor (Ollama)
 
-**Quickstart (bundled model):**
+**Setup:**
 
 ```bash
-npm run download-model   # 2.3GB, once only (~2–5 min)
+# Install Ollama, then run:
+ollama pull phi3         # Or any phi3 variant
 lintropy check --ai      # Static + AI advisor
 ```
-
-**Or use Ollama (zero download if you have it):**
-
-```bash
-ollama pull phi3         # Or any phi3 variant
-lintropy check --ai --model ollama
-```
-
-**Model discovery order:** bundled (`models/phi3.q4.gguf`) → Ollama (auto-detect phi3) → error with instructions.
-
-**CLI flags:**
-- `lintropy check --ai` — auto-detect (bundled > ollama > error)
-- `lintropy check --ai --model ollama` — force Ollama
-- `lintropy check --ai --model bundled` — force bundled GGUF
-- `lintropy check --ai --model-path ./custom.gguf` — custom GGUF path
 
 **Config (`.lintropy.json`):**
 
 ```json
 {
-  "model": "bundled",
-  "thresholds": { "ai": 0.35 },
   "ollama": { "model": "phi3", "baseUrl": "http://localhost:11434" }
 }
 ```
 
 Examples:
-- `bun run dev -- check src --ai --ai-threshold 0.35`
-- `bun run dev -- check src --ai --fix-dry-run` — preview AI fixes without applying
-- `bun run dev -- check src --ai --fix` — apply AI-generated refactors
+- `lintropy check --ai` — analyze with AI advisor
+- `lintropy check --ai --fix-dry-run` — preview AI fixes without applying
+- `lintropy check --ai --fix` — apply AI-generated refactors
 
 ### AI safety and compliance
 
 - AI mode is advisory-only and does not control policy pass/fail.
 - Invalid AI output is dropped via strict JSON validation.
-- Advisor uses local `llama-cli` with deterministic settings and timeouts.
+- Advisor uses local Ollama (no external API calls).
 - See `AI_SAFETY.md` and `THIRD_PARTY.md` for policy/compliance details.
 
 ## Entropy defaults
@@ -113,7 +97,6 @@ Current GitHub Actions workflow runs `bun run check` and `bun run test` as the d
 - Only merge PRs after CI (`check`) passes.
 - Release on npm:
   1. Ensure `main` is green (`bun run check` and `bun run test`).
-  2. Bump version and create a git tag: `npm version patch` (or `minor` / `major`).
-  3. Push commit + tag: `git push && git push --tags`.
-  4. Tag pushes matching `v*` trigger `.github/workflows/publish.yml`.
-  5. Publish job runs checks/tests and `npm publish --provenance --access public`.
+  2. Run `bun run release` (or `npx release-it`) — bumps version, commits, tags, pushes, creates GitHub release.
+  3. Tag pushes matching `v*` trigger `.github/workflows/publish.yml`.
+  4. Publish job runs checks/tests and `npm publish --provenance --access public`.

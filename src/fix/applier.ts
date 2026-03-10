@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { AiAdvice } from '../advisor/phi3.js';
+import type { AiAdvice } from '../advisor/phi3-shared.js';
 
 interface ApplyResult {
   path: string;

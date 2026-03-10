@@ -1,8 +1,7 @@
 /**
- * Shared prompt building and response parsing for phi3 (llama-cli) and Ollama.
+ * Shared prompt building and response parsing for Ollama advisor.
  */
 import type { FileMetrics, ScoredFile } from '../model/metrics.js';
-import type { AiAdvice } from './phi3.js';
 
 export interface AiProgressInfo {
   current: number;
@@ -12,13 +11,29 @@ export interface AiProgressInfo {
   etaMs?: number;
 }
 
-export const PRIMARY_ISSUES = [
+const PRIMARY_ISSUES = [
   'god_function',
   'deep_nesting',
   'mixed_responsibility',
   'noisy_types',
   'vibe_chaining',
 ] as const;
+
+export type PrimaryIssue = (typeof PRIMARY_ISSUES)[number];
+
+export interface AiAdvice {
+  tags: string[];
+  severity: number;
+  explanation: string;
+  suggestion: string;
+  model: string;
+  fixedCode?: string;
+  primaryIssue?: PrimaryIssue | string;
+  blameLines?: (number | string)[];
+  fixCode?: string;
+  entropyDelta?: string;
+  confidence?: number;
+}
 
 function p90(arr: number[]): number {
   if (arr.length === 0) return 0;

@@ -10,7 +10,7 @@
 - Deterministic defaults: fixed seed, low temperature, bounded token output.
 - Per-file timeout and retry controls (`--ai-timeout-ms`, `--ai-retries`).
 - Code input is truncated to reduce leakage and context spillover.
-- Advisor runs local `llama-cli`; no network calls are made by advisor code.
+- Advisor uses local Ollama; no external API calls are made.
 
 ## Operational Guidance
 

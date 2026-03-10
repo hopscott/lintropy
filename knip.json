@@ -2,7 +2,6 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "project": ["src/**/*.ts"],
   "ignoreIssues": {
-    "src/advisor/config.ts": ["types"],
     "src/advisor/ollama.ts": ["types"]
   }
 }

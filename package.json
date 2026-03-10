@@ -9,8 +9,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "bun src/cli.ts",
-    "download-model": "bun src/download.ts",
-    "setup": "bun run download-model && bun run dev -- baseline",
+    "setup": "bun run dev -- baseline",
     "lint:biome": "biome check .",
     "lint:eslint": "eslint .",
     "lint": "biome check . && eslint .",
@@ -22,6 +21,7 @@
     "prepack": "bun run build",
     "prepublishOnly": "bun run build",
     "prepare": "husky",
+    "release": "release-it",
     "publish:local": "bun run scripts/publish-local.ts"
   },
   "files": [
@@ -47,6 +47,7 @@
     "eslint": "^10.0.3",
     "husky": "^9.1.7",
     "knip": "^5.86.0",
+    "release-it": "^19.2.4",
     "typescript-eslint": "^8.57.0",
     "vitest": "^4.0.18"
   }
