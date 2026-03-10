@@ -5,6 +5,7 @@ import { findModel } from './advisor/config.js';
 import { runOllamaAdvisor } from './advisor/ollama.js';
 import type { AiAdvice } from './advisor/phi3.js';
 import { runPhi3Advisor } from './advisor/phi3.js';
+import type { AiProgressInfo } from './advisor/phi3-shared.js';
 import type { AiSelection } from './advisor/selection.js';
 import { selectAiCandidates } from './advisor/selection.js';
 import { analyzeFile } from './analyze/ast.js';
@@ -16,6 +17,70 @@ import { formatTextReport } from './report/text.js';
 import { ENTROPY_DEFAULTS, exceedsAbsoluteCap, scoreFile, scoreProject } from './score/entropy.js';
 
 const DRIFT_DEFAULT_BUDGET = 0.05;
+
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const BAR_WIDTH = 16;
+
+function formatEta(ms: number): string {
+  if (ms < 1000) return '< 1s';
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `~${sec}s`;
+  const min = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s > 0 ? `~${min}m ${s}s` : `~${min}m`;
+}
+
+function createProgressReporter(): {
+  onProgress: (info: AiProgressInfo) => void;
+  onComplete: () => void;
+} {
+  const isTTY = process.stderr.isTTY === true;
+  let frame = 0;
+  let lastInfo: AiProgressInfo | null = null;
+  let interval: ReturnType<typeof setInterval> | null = null;
+
+  const render = () => {
+    if (!lastInfo) return;
+    const { current, total, filePath, etaMs } = lastInfo;
+    const rel = path.relative(process.cwd(), filePath) || filePath;
+    const truncated = rel.length > 36 ? `...${rel.slice(-33)}` : rel;
+    const pct = Math.round((current / total) * 100);
+    const filled = Math.round((current / total) * BAR_WIDTH);
+    const bar = '█'.repeat(filled) + '░'.repeat(BAR_WIDTH - filled);
+    const eta = etaMs !== undefined ? ` · ${formatEta(etaMs)} left` : '';
+    const spin = isTTY ? SPINNER[frame % SPINNER.length] : '•';
+
+    const line = `${spin} [${bar}] ${current}/${total} ${truncated}${eta}`;
+    if (isTTY) {
+      process.stderr.write(`\r${line}   `);
+    } else {
+      process.stderr.write(`${line}\n`);
+    }
+  };
+
+  return {
+    onProgress: (info) => {
+      lastInfo = info;
+      if (isTTY && !interval) {
+        interval = setInterval(() => {
+          frame += 1;
+          render();
+        }, 80);
+      }
+      render();
+    },
+    onComplete: () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+      if (isTTY && lastInfo) {
+        process.stderr.write('\r' + ' '.repeat(100) + '\r');
+      }
+      lastInfo = null;
+    },
+  };
+}
 
 async function computeScores(paths: string[]) {
   const files = await discoverTypeScriptFiles(paths);
@@ -128,6 +193,7 @@ async function main(): Promise<void> {
         let aiSelection: AiSelection | undefined;
         if (options.ai && scoredFiles.length > 0) {
           aiSelection = selectAiCandidates(scoredFiles, aiThreshold);
+          const progress = createProgressReporter();
           try {
             const override: string | undefined = options.modelPath
               ? path.resolve(process.cwd(), options.modelPath)
@@ -137,6 +203,8 @@ async function main(): Promise<void> {
             const resolved = await findModel(override !== undefined ? { override } : undefined);
             if (resolved.type === 'ollama') {
               console.error(`🤖 Using Ollama model: ${resolved.pathOrName}`);
+              const n = aiSelection.candidates.length;
+              if (n > 0) console.error(`AI analyzing ${n} file(s)...`);
               aiByPath = await runOllamaAdvisor(aiSelection.candidates, {
                 modelName: resolved.pathOrName,
                 maxFiles: aiSelection.candidates.length,
@@ -144,9 +212,12 @@ async function main(): Promise<void> {
                 retries: aiRetries,
                 fixMode,
                 metricsByPath,
+                onProgress: progress.onProgress,
               });
             } else {
               console.error(`🤖 Using bundled/local model: ${resolved.pathOrName}`);
+              const n = aiSelection.candidates.length;
+              if (n > 0) console.error(`AI analyzing ${n} file(s)...`);
               aiByPath = await runPhi3Advisor(aiSelection.candidates, {
                 modelPath: resolved.pathOrName,
                 maxFiles: aiSelection.candidates.length,
@@ -154,9 +225,12 @@ async function main(): Promise<void> {
                 retries: aiRetries,
                 fixMode,
                 metricsByPath,
+                onProgress: progress.onProgress,
               });
             }
+            if (aiSelection.candidates.length > 0) progress.onComplete();
           } catch (error: unknown) {
+            progress.onComplete();
             console.error(
               `AI advisor disabled: ${
                 error instanceof Error ? error.message : 'unknown advisor failure'

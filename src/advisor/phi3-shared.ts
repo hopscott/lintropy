@@ -4,6 +4,14 @@
 import type { FileMetrics, ScoredFile } from '../model/metrics.js';
 import type { AiAdvice } from './phi3.js';
 
+export interface AiProgressInfo {
+  current: number;
+  total: number;
+  filePath: string;
+  /** Estimated ms remaining (undefined until at least one file has completed) */
+  etaMs?: number;
+}
+
 export const PRIMARY_ISSUES = [
   'god_function',
   'deep_nesting',

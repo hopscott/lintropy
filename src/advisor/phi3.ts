@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import type { FileMetrics, ScoredFile } from '../model/metrics.js';
+import type { AiProgressInfo } from './phi3-shared.js';
 import { buildAdvisorPrompt, type PRIMARY_ISSUES, parseAdvisorResponse } from './phi3-shared.js';
 
 export type PrimaryIssue = (typeof PRIMARY_ISSUES)[number];
@@ -34,6 +35,7 @@ interface AdvisorParams {
   fixMode?: boolean;
   /** Raw metrics by path for richer prompt context. */
   metricsByPath?: Map<string, FileMetrics>;
+  onProgress?: (info: AiProgressInfo) => void;
 }
 
 function runLlamaPrompt(args: {
@@ -109,8 +111,24 @@ export async function runPhi3Advisor(
 
   const results = new Map<string, AiAdvice>();
   const metricsByPath = params.metricsByPath ?? new Map();
+  const total = topFiles.length;
+  const startTime = Date.now();
 
-  for (const file of topFiles) {
+  for (let i = 0; i < topFiles.length; i += 1) {
+    const file = topFiles[i]!;
+    const current = i + 1;
+    const elapsedMs = Date.now() - startTime;
+    const completedCount = i;
+    const avgMsPerFile = completedCount > 0 ? elapsedMs / completedCount : undefined;
+    const etaMs = avgMsPerFile !== undefined ? avgMsPerFile * (total - current) : undefined;
+
+    params.onProgress?.({
+      current,
+      total,
+      filePath: file.path,
+      ...(etaMs !== undefined && { etaMs }),
+    });
+
     const source = await fs.readFile(file.path, 'utf-8');
     const metrics = metricsByPath.get(file.path);
     const prompt = buildAdvisorPrompt(file, source.slice(0, 4000), fixMode, metrics);
