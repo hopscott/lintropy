@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import { Command } from 'commander';
+import { findModel } from './advisor/config.js';
+import { runOllamaAdvisor } from './advisor/ollama.js';
 import type { AiAdvice } from './advisor/phi3.js';
 import { runPhi3Advisor } from './advisor/phi3.js';
 import type { AiSelection } from './advisor/selection.js';
@@ -14,7 +16,6 @@ import { formatTextReport } from './report/text.js';
 import { ENTROPY_DEFAULTS, exceedsAbsoluteCap, scoreFile, scoreProject } from './score/entropy.js';
 
 const DRIFT_DEFAULT_BUDGET = 0.05;
-const DEFAULT_AI_MODEL_PATH = 'models/Phi-3.5-mini-instruct-Q4_K_M.gguf';
 
 async function computeScores(paths: string[]) {
   const files = await discoverTypeScriptFiles(paths);
@@ -49,7 +50,8 @@ async function main(): Promise<void> {
     .option('--ai', 'Enable Phi-3 advisor for top offenders', false)
     .option('--fix', 'Apply AI-generated fixes to files (requires --ai)', false)
     .option('--fix-dry-run', 'Show what would be fixed without writing (requires --ai)', false)
-    .option('--model-path <path>', 'Path to GGUF model file', DEFAULT_AI_MODEL_PATH)
+    .option('--model <source>', 'Model source: auto (default) | bundled | ollama | <path>', 'auto')
+    .option('--model-path <path>', 'Path to GGUF model file (overrides --model when set)')
     .option('--ai-threshold <value>', 'Only run AI on files with entropy >= threshold', '0.35')
     .option('--ai-timeout-ms <value>', 'Per-file AI timeout in milliseconds', '45000')
     .option('--ai-retries <count>', 'AI retries per file on parse/runtime failure', '1')
@@ -65,7 +67,8 @@ async function main(): Promise<void> {
           ai: boolean;
           fix: boolean;
           fixDryRun: boolean;
-          modelPath: string;
+          model: string;
+          modelPath?: string;
           aiThreshold: string;
           aiTimeoutMs: string;
           aiRetries: string;
@@ -126,14 +129,33 @@ async function main(): Promise<void> {
         if (options.ai && scoredFiles.length > 0) {
           aiSelection = selectAiCandidates(scoredFiles, aiThreshold);
           try {
-            aiByPath = await runPhi3Advisor(aiSelection.candidates, {
-              modelPath: options.modelPath,
-              maxFiles: aiSelection.candidates.length,
-              timeoutMs: aiTimeoutMs,
-              retries: aiRetries,
-              fixMode,
-              metricsByPath,
-            });
+            const override: string | undefined = options.modelPath
+              ? path.resolve(process.cwd(), options.modelPath)
+              : options.model === 'auto'
+                ? undefined
+                : options.model;
+            const resolved = await findModel(override !== undefined ? { override } : undefined);
+            if (resolved.type === 'ollama') {
+              console.error(`🤖 Using Ollama model: ${resolved.pathOrName}`);
+              aiByPath = await runOllamaAdvisor(aiSelection.candidates, {
+                modelName: resolved.pathOrName,
+                maxFiles: aiSelection.candidates.length,
+                timeoutMs: aiTimeoutMs,
+                retries: aiRetries,
+                fixMode,
+                metricsByPath,
+              });
+            } else {
+              console.error(`🤖 Using bundled/local model: ${resolved.pathOrName}`);
+              aiByPath = await runPhi3Advisor(aiSelection.candidates, {
+                modelPath: resolved.pathOrName,
+                maxFiles: aiSelection.candidates.length,
+                timeoutMs: aiTimeoutMs,
+                retries: aiRetries,
+                fixMode,
+                metricsByPath,
+              });
+            }
           } catch (error: unknown) {
             console.error(
               `AI advisor disabled: ${
