@@ -32,6 +32,8 @@ This repo uses:
 
 ## CLI usage
 
+- Install once globally: `npm i -g lintropy`
+- Run without install: `npx lintropy check src` (or `bunx lintropy check src`)
 - `bun run dev -- check [paths...]`
   - analyzes TS files and enforces absolute-cap gate
   - options: `--format text|json`, `--max-entropy`, `--drift-budget`, `--no-baseline`
@@ -78,3 +80,9 @@ Current GitHub Actions workflow runs `bun run check` and `bun run test` as the d
 - Promotion: open PR from `beta` into `main` after beta validation.
 - `main` and `beta` are protected branches with required PR checks.
 - Only merge PRs after CI (`check`) passes.
+- Release on npm:
+  1. Ensure `main` is green (`bun run check` and `bun run test`).
+  2. Bump version and create a git tag: `npm version patch` (or `minor` / `major`).
+  3. Push commit + tag: `git push && git push --tags`.
+  4. Tag pushes matching `v*` trigger `.github/workflows/publish.yml`.
+  5. Publish job runs checks/tests and `npm publish --provenance --access public`.
