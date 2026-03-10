@@ -4,3 +4,4 @@ dist/
 coverage/
 .lintropy-baseline.json
 models/*.gguf
+.env
